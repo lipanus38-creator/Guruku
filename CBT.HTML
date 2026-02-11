@@ -1,0 +1,777 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ASESMEN FISIKA KELAS XII (LISTRIK STATIS & DINAMIS)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; background-color: #f7f9fb; }
+        .card { background-color: white; border-radius: 1rem; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05), 0 1px 3px rgba(0, 0, 0, 0.1); }
+        .btn-primary { background-color: #4f46e5; color: white; padding: 0.75rem 1.5rem; border-radius: 0.5rem; transition: background-color 0.2s; }
+        .btn-primary:hover { background-color: #4338ca; }
+        .btn-secondary { background-color: #e5e7eb; color: #374151; padding: 0.75rem 1.5rem; border-radius: 0.5rem; transition: background-color 0.2s; }
+        .btn-secondary:hover { background-color: #d1d5db; }
+        .question-nav-item { cursor: pointer; transition: transform 0.1s; }
+        .question-nav-item:hover { transform: scale(1.05); }
+        .active-q { background-color: #4f46e5; color: white; font-weight: 600; }
+        .answered-q { background-color: #10b981; color: white; }
+    </style>
+    <!-- jsPDF for PDF generation on Teacher page -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <!-- PENTING: Menambahkan plugin AutoTable -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.25/jspdf.plugin.autotable.min.js"></script>
+    
+    <!-- LaTeX Rendering Engine (KaTeX) -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css" xintegrity="sha384-Gvr5sWKadY3tX8/dJvj2c3z4eNnKkX4/bF1fN7GqB8p3b4F5Z4v8L" crossorigin="anonymous">
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.js" xintegrity="sha384-T79s3Bf/5Jb6R1p6P1hW8H1v6G2V+S8PzC/S0R1S2Z5A5n9P2hXyQ8zE+W1E+P+G/B9/A5U1" crossorigin="anonymous"></script>
+    <!-- FIX: Menghapus 'onload="renderMathInElement(document.body);"' karena rendering dikontrol secara manual -->
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/contrib/auto-render.min.js" xintegrity="sha384-MIG/u/NlXj/W7R+y6kG/gN+kH1tG7Z/jPzQ1U0n6S/dJv5K+t5sQ8zE+W1E+P+G/B9/A5U1" crossorigin="anonymous"></script>
+</head>
+<body class="p-4 md:p-8 min-h-screen flex items-center justify-center">
+
+    <!-- Container Utama -->
+    <div id="app-container" class="w-full max-w-7xl">
+        <!-- Konten akan dimuat di sini (Login, Siswa, Guru) -->
+    </div>
+
+    <!-- Firebase Imports and Logic -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, getDoc, setDoc, onSnapshot, collection, query, where, getDocs, updateDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Setel level log untuk melihat pesan debug dari Firestore
+        setLogLevel('Debug');
+
+        // --- GLOBAL VARIABLES (Canvas Environment) ---
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-cbt-app';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {
+            apiKey: "MOCK_API_KEY", projectId: "MOCK_PROJECT_ID", appId: "MOCK_APP_ID"
+        };
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        // --- FIREBASE INITIALIZATION ---
+        let app, db, auth, userId = null;
+        let isAuthReady = false;
+
+        try {
+            app = initializeApp(firebaseConfig);
+            db = getFirestore(app);
+            auth = getAuth(app);
+            
+            console.log("Firebase initialized.");
+        } catch (error) {
+            console.error("Error initializing Firebase:", error);
+            document.getElementById('app-container').innerHTML = `
+                <div class="card p-6 text-red-600">
+                    <p>Gagal menginisialisasi Firebase. Silakan periksa konfigurasi.</p>
+                </div>
+            `;
+            isAuthReady = true; 
+        }
+
+        /**
+         * Mengautentikasi pengguna menggunakan token kustom atau secara anonim.
+         */
+        async function authenticateUser() {
+            try {
+                if (initialAuthToken) {
+                    await signInWithCustomToken(auth, initialAuthToken);
+                    console.log("Signed in with custom token.");
+                } else {
+                    await signInAnonymously(auth);
+                    console.log("Signed in anonymously.");
+                }
+            } catch (error) {
+                console.error("Authentication error:", error);
+                if (!auth.currentUser) {
+                    userId = `anon-${crypto.randomUUID()}`;
+                }
+            }
+        }
+
+        onAuthStateChanged(auth, (user) => {
+            if (user) {
+                userId = user.uid;
+                console.log("Current user ID:", userId);
+            } else if (!userId) {
+                userId = `anon-${crypto.randomUUID()}`;
+            }
+            isAuthReady = true;
+            renderView(currentView); // Render ulang setelah autentikasi selesai
+        });
+
+        authenticateUser();
+
+        // --- APPLICATION STATE ---
+        let currentView = 'login';
+        let studentName = '';
+        let studentRole = ''; // 'siswa' or 'guru'
+        let currentQuestionIndex = 0;
+        const totalExamTime = 60 * 60; // 60 minutes in seconds
+        let timeLeft = totalExamTime;
+        let timerInterval = null;
+        const answers = {}; // { questionId: answer }
+        let currentResults = []; // Store fetched results for PDF download
+
+        // Data Soal Fisika Kelas XII: Listrik Statis & Dinamis (30 Soal)
+        const questions = [
+            // Pilihan Ganda (MC) - Listrik Statis (10 Soal)
+            { id: 'q1', type: 'mc', text: 'Dua buah muatan $q_1 = 2 \\times 10^{-6} \\text{ C}$ dan $q_2 = 3 \\times 10^{-6} \\text{ C}$ terpisah sejauh $0.3 \\text{ m}$. Jika konstanta Coulomb $k = 9 \\times 10^9 \\text{ Nm}^2/\\text{C}^2$, besar gaya Coulomb yang dialami kedua muatan adalah...', options: { A: '$0.6 \\text{ N}$', B: '$1.8 \\text{ N}$', C: '$0.18 \\text{ N}$', D: '$6.0 \\text{ N}$', E: '$18.0 \\text{ N}$' }, answer: 'A', topic: 'Listrik Statis' },
+            { id: 'q2', type: 'mc', text: 'Arah garis-garis medan listrik yang benar yang dihasilkan oleh sebuah muatan titik positif adalah...', options: { A: 'Menuju ke muatan tersebut', B: 'Meninggalkan muatan tersebut', C: 'Tegak lurus dengan permukaan konduktor', D: 'Paralel dengan permukaan konduktor', E: 'Spiral mengelilingi muatan' }, answer: 'B', topic: 'Listrik Statis' },
+            { id: 'q3', type: 'mc', text: 'Energi potensial listrik antara dua muatan titik berbanding lurus dengan perkalian muatan dan berbanding terbalik dengan...', options: { A: 'Kuadrat jarak antara muatan', B: 'Kuadrat kebalikan jarak antara muatan', C: 'Jarak antara muatan', D: 'Kuadrat muatan', E: 'Akar kuadrat jarak antara muatan' }, answer: 'C', topic: 'Listrik Statis' },
+            { id: 'q4', type: 'mc', text: 'Sebuah kapasitor keping sejajar diisi dengan bahan dielektrik yang memiliki konstanta dielektrik $\\kappa > 1$. Setelah pengisian, nilai kapasitansi kapasitor akan...', options: { A: 'Menurun menjadi $1/\\kappa$ kali', B: 'Meningkat sebesar $\\kappa$ kali', C: 'Tidak berubah', D: 'Berkurang sebesar $\\kappa$ kali', E: 'Berubah secara eksponensial' }, answer: 'B', topic: 'Listrik Statis' },
+            { id: 'q5', type: 'mc', text: 'Satuan dari potensial listrik dalam Satuan Internasional (SI) adalah Volt ($\text{V}$). Satuan ini setara dengan...', options: { A: 'Newton per Coulomb ($\\text{N/C}$)', B: 'Joule per Coulomb ($\\text{J/C}$)', C: 'Coulomb per Volt ($\\text{C/V}$)', D: 'Farad ($\\text{F}$)', E: 'Watt ($\\text{W}$)' }, answer: 'B', topic: 'Listrik Statis' },
+            { id: 'q6', type: 'mc', text: 'Titik $P$ berada $1 \\text{ cm}$ dari muatan titik sebesar $10 \\times 10^{-9} \\text{ C}$. Kuat medan listrik di titik $P$ adalah...', options: { A: '$9 \\times 10^4 \\text{ N/C}$', B: '$9 \\times 10^5 \\text{ N/C}$', C: '$9 \\times 10^3 \\text{ N/C}$', D: '$9 \\times 10^6 \\text{ N/C}$', E: '$9 \\times 10^7 \\text{ N/C}$' }, answer: 'B', topic: 'Listrik Statis' },
+            { id: 'q7', type: 'mc', text: 'Tiga kapasitor dengan nilai $C_1 = 1 \\text{ $\\mu$F}$, $C_2 = 2 \\text{ $\\mu$F}$, dan $C_3 = 3 \\text{ $\\mu$F}$ dihubungkan secara seri. Kapasitansi total (ekivalen) dari rangkaian tersebut adalah...', options: { A: '$6 \\text{ $\\mu$F}$', B: '$1.83 \\text{ $\\mu$F}$', C: '$0.545 \\text{ $\\mu$F}$', D: '$11 \\text{ $\\mu$F}$', E: '$0.909 \\text{ $\\mu$F}$' }, answer: 'C', topic: 'Listrik Statis' },
+            { id: 'q8', type: 'mc', text: 'Untuk memindahkan muatan sebesar $5 \\text{ C}$ dari titik $A$ ke titik $B$ diperlukan energi sebesar $100 \\text{ J}$. Beda potensial antara titik $A$ dan $B$ adalah...', options: { A: '$5 \\text{ V}$', B: '$20 \\text{ V}$', C: '$500 \\text{ V}$', D: '$0.05 \\text{ V}$', E: '$105 \\text{ V}$' }, answer: 'B', topic: 'Listrik Statis' },
+            { id: 'q9', type: 'mc', text: 'Hukum Gauss dalam elektrostatika memberikan hubungan antara fluks listrik ($\Phi_E$) yang melalui permukaan tertutup dengan...', options: { A: 'Gaya Coulomb antara muatan', B: 'Muatan total ($Q_{enclosed}$) yang dilingkupi permukaan tersebut', C: 'Energi potensial listrik', D: 'Kapasitansi kapasitor', E: 'Hambatan listrik konduktor' }, answer: 'B', topic: 'Listrik Statis' },
+            { id: 'q10', type: 'mc', text: 'Nilai muatan elementer (muatan pada satu elektron atau proton) adalah...', options: { A: '$1.6 \\times 10^{-19} \\text{ C}$', B: '$9.1 \\times 10^{-31} \\text{ kg}$', C: '$6.62 \\times 10^{-34} \\text{ Js}$', D: '$3 \\times 10^8 \\text{ m/s}$', E: '$1 \\text{ C}$' }, answer: 'A', topic: 'Listrik Statis' },
+
+            // Pilihan Ganda (MC) - Listrik Dinamis (10 Soal)
+            { id: 'q11', type: 'mc', text: 'Sebuah kawat memiliki hambatan $10 \\text{ $\\Omega$}$. Jika kawat tersebut dihubungkan dengan sumber tegangan $20 \\text{ V}$, kuat arus listrik yang mengalir melalui kawat adalah...', options: { A: '$0.5 \\text{ A}$', B: '$2 \\text{ A}$', C: '$10 \\text{ A}$', D: '$200 \\text{ A}$', E: '$30 \\text{ A}$' }, answer: 'B', topic: 'Listrik Dinamis' },
+            { id: 'q12', type: 'mc', text: 'Hambatan suatu kawat konduktor secara fisik ditentukan oleh faktor-faktor berikut, **kecuali**...', options: { A: 'Jenis bahan (hambatan jenis)', B: 'Panjang kawat', C: 'Luas penampang kawat', D: 'Beda potensial pada ujung kawat', E: 'Suhu kawat' }, answer: 'D', topic: 'Listrik Dinamis' },
+            { id: 'q13', type: 'mc', text: 'Hukum I Kirchhoff (Hukum Arus Kirchhoff) menyatakan bahwa jumlah kuat arus listrik yang masuk pada suatu titik percabangan harus sama dengan...', options: { A: 'Kuadrat arus yang keluar', B: 'Jumlah tegangan pada loop tertutup', C: 'Jumlah kuat arus yang keluar', D: 'Nol', E: 'Hambatan total rangkaian' }, answer: 'C', topic: 'Listrik Dinamis' },
+            { id: 'q14', type: 'mc', text: 'Satuan daya listrik dalam Satuan Internasional (SI) adalah Watt ($\text{W}$). Daya listrik juga dapat dinyatakan dalam satuan...', options: { A: 'Joule ($\\text{J}$)', B: 'Joule per detik ($\\text{J/s}$)', C: 'Volt ($\\text{V}$)', D: 'Ohm ($\\text{ $\\Omega$}$)', E: 'Ampere ($\\text{A}$)' }, answer: 'B', topic: 'Listrik Dinamis' },
+            { id: 'q15', type: 'mc', text: 'Tiga resistor masing-masing $R_1 = 2 \\text{ $\\Omega$}$, $R_2 = 3 \\text{ $\\Omega$}$, dan $R_3 = 5 \\text{ $\\Omega$}$ dihubungkan secara seri. Hambatan total (ekivalen) dari rangkaian tersebut adalah...', options: { A: '$10 \\text{ $\\Omega$}$', B: '$0.5 \\text{ $\\Omega$}$', C: '$30 \\text{ $\\Omega$}$', D: '$1 \\text{ $\\Omega$}$', E: '$2.5 \\text{ $\\Omega$}$' }, answer: 'A', topic: 'Listrik Dinamis' },
+            { id: 'q16', type: 'mc', text: 'Dalam rangkaian listrik paralel, besaran fisika yang nilainya selalu sama pada setiap komponen yang terhubung paralel adalah...', options: { A: 'Kuat arus listrik', B: 'Hambatan listrik', C: 'Beda potensial (tegangan)', D: 'Daya listrik', E: 'Muatan listrik' }, answer: 'C', topic: 'Listrik Dinamis' },
+            { id: 'q17', type: 'mc', text: 'Energi listrik ($W$) yang digunakan pada suatu alat selama waktu $t$ dengan arus $I$ dan tegangan $V$ diberikan oleh rumus...', options: { A: '$W = V/I$', B: '$W = I^2 R$', C: '$W = V I t$', D: '$W = V^2 R t$', E: '$W = R/I$' }, answer: 'C', topic: 'Listrik Dinamis' },
+            { id: 'q18', type: 'mc', text: 'Keberadaan hambatan dalam ($r$) pada sumber tegangan (misalnya baterai) menyebabkan hubungan antara Tegangan GGL ($\\varepsilon$) dan Tegangan Jepit ($V_{jepit}$) menjadi...', options: { A: '$V_{jepit} > \\varepsilon$', B: '$V_{jepit} = \\varepsilon$', C: '$I_{total} = 0$', D: '$V_{jepit} < \\varepsilon$', E: '$V_{jepit}$ tidak bergantung pada $r$' }, answer: 'D', topic: 'Listrik Dinamis' },
+            { id: 'q19', type: 'mc', text: 'Hukum II Kirchhoff (Hukum Tegangan Kirchhoff) yang menyatakan bahwa jumlah aljabar tegangan dalam satu loop tertutup sama dengan nol merupakan manifestasi dari hukum kekekalan...', options: { A: 'Muatan', B: 'Energi', C: 'Momentum', D: 'Massa', E: 'Arus' }, answer: 'B', topic: 'Listrik Dinamis' },
+            { id: 'q20', type: 'mc', text: 'Agar suatu bahan dikategorikan sebagai konduktor listrik yang baik, bahan tersebut harus memiliki...', options: { A: 'Hambatan jenis yang sangat besar', B: 'Luas penampang yang sangat kecil', C: 'Hambatan jenis yang sangat kecil', D: 'Panjang kawat yang sangat pendek', E: 'Suhu yang sangat tinggi' }, answer: 'C', topic: 'Listrik Dinamis' },
+
+            // Benar/Salah (T/F) - Listrik Statis (5 Soal)
+            { id: 'q21', type: 'tf', text: 'Besar gaya Coulomb antara dua muatan listrik berbanding lurus dengan kuadrat jarak antara kedua muatan tersebut.', answer: 'Salah', topic: 'Listrik Statis' }, // F: Inverse square
+            { id: 'q22', type: 'tf', text: 'Garis-garis medan listrik digambarkan tidak pernah berpotongan satu sama lain.', answer: 'Benar', topic: 'Listrik Statis' },
+            { id: 'q23', type: 'tf', text: 'Permukaan ekuipotensial adalah permukaan yang memiliki kuat medan listrik yang sama di setiap titiknya.', answer: 'Salah', topic: 'Listrik Statis' }, // F: Has same potential, not E-field
+            { id: 'q24', type: 'tf', text: 'Energi listrik yang tersimpan dalam sebuah kapasitor berbanding lurus dengan kuadrat beda potensial (tegangan) pada kapasitor.', answer: 'Benar', topic: 'Listrik Statis' },
+            { id: 'q25', type: 'tf', text: 'Muatan yang tidak sejenis (positif dan negatif) akan saling tarik-menarik.', answer: 'Benar', topic: 'Listrik Statis' },
+
+            // Benar/Salah (T/F) - Listrik Dinamis (5 Soal)
+            { id: 'q26', type: 'tf', text: 'Arus listrik konvensional didefinisikan sebagai aliran muatan positif dari potensial rendah ke potensial tinggi.', answer: 'Salah', topic: 'Listrik Dinamis' }, // F: High to low potential
+            { id: 'q27', type: 'tf', text: 'Pada rangkaian resistor seri, hambatan total ekivalen selalu lebih besar daripada nilai hambatan komponen terbesar di dalamnya.', answer: 'Benar', topic: 'Listrik Dinamis' },
+            { id: 'q28', type: 'tf', text: 'Hukum I Kirchhoff merupakan penerapan dari hukum kekekalan muatan listrik.', answer: 'Benar', topic: 'Listrik Dinamis' },
+            { id: 'q29', type: 'tf', text: 'Hukum Joule digunakan untuk menghitung daya listrik yang dikonsumsi oleh suatu alat.', answer: 'Salah', topic: 'Listrik Dinamis' }, // F: Calculates Electric Energy (W) converted to heat (Q)
+            { id: 'q30', type: 'tf', text: 'Alat ukur Amperemeter harus dipasang secara paralel dengan komponen yang akan diukur arusnya.', answer: 'Salah', topic: 'Listrik Dinamis' } // F: Amperemeter installed in series
+        ];
+
+        // --- FIREBASE UTILITIES ---
+        const getResultsCollection = () => collection(db, `/artifacts/${appId}/public/data/exam_results`);
+        const getLoggedStudentsCollection = () => collection(db, `/artifacts/${appId}/public/data/logged_students`);
+
+        /**
+         * Mengambil semua hasil ujian untuk dashboard guru
+         * @returns {Promise<Array>}
+         */
+        async function fetchAllResults() {
+            if (!isAuthReady || !db) return [];
+            try {
+                const q = query(getResultsCollection());
+                const querySnapshot = await getDocs(q);
+                const results = [];
+                querySnapshot.forEach((doc) => {
+                    results.push(doc.data());
+                });
+                return results.sort((a, b) => b.score - a.score); // Sort by score descending
+            } catch (error) {
+                console.error("Error fetching results:", error);
+                return [];
+            }
+        }
+
+        /**
+         * Menyimpan hasil ujian siswa ke Firestore
+         */
+        async function saveStudentResult(name, score, totalQuestions) {
+            if (!isAuthReady || !db || !userId) {
+                alertModal("Gagal menyimpan hasil: Autentikasi belum siap atau ID pengguna tidak ada.", "error");
+                return;
+            }
+
+            const resultDocRef = doc(getResultsCollection(), name.toLowerCase().replace(/\s/g, '_'));
+            const loggedDocRef = doc(getLoggedStudentsCollection(), name.toLowerCase().replace(/\s/g, '_'));
+
+            try {
+                // Simpan hasil ujian
+                await setDoc(resultDocRef, {
+                    name: name,
+                    userId: userId,
+                    score: score,
+                    totalQuestions: totalQuestions,
+                    percentage: (score / totalQuestions) * 100,
+                    timestamp: new Date().toISOString()
+                });
+
+                // Tandai siswa sudah login/selesai
+                await setDoc(loggedDocRef, { name: name, loggedIn: true });
+
+                console.log("Result and login status saved successfully.");
+            } catch (error) {
+                console.error("Error saving result:", error);
+                alertModal("Terjadi kesalahan saat menyimpan hasil.", "error");
+            }
+        }
+
+        /**
+         * Memeriksa apakah siswa sudah pernah login/mengerjakan
+         */
+        async function checkStudentLogin(name) {
+            if (!isAuthReady || !db) return false;
+            try {
+                const docRef = doc(getLoggedStudentsCollection(), name.toLowerCase().replace(/\s/g, '_'));
+                const docSnap = await getDoc(docRef);
+                return docSnap.exists() && docSnap.data().loggedIn === true;
+            } catch (error) {
+                console.error("Error checking login status:", error);
+                return false;
+            }
+        }
+
+
+        // --- UI RENDERING ---
+
+        /**
+         * Fungsi utilitas untuk menampilkan modal kustom
+         */
+        function alertModal(message, type = 'info') {
+            const container = document.getElementById('app-container');
+            let color = type === 'error' ? 'bg-red-500' : 'bg-green-500';
+            let title = type === 'error' ? 'Terjadi Kesalahan' : 'Pemberitahuan';
+
+            const modalHtml = `
+                <div id="custom-modal" class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 transition-opacity duration-300">
+                    <div class="card p-6 w-11/12 md:w-1/3 transform scale-95 transition-transform duration-300">
+                        <div class="flex justify-between items-start border-b pb-3 mb-4">
+                            <h3 class="text-xl font-bold text-gray-800">${title}</h3>
+                            <button onclick="document.getElementById('custom-modal').remove();" class="text-gray-400 hover:text-gray-600">
+                                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                            </button>
+                        </div>
+                        <p class="text-gray-700 mb-6">${message}</p>
+                        <button onclick="document.getElementById('custom-modal').remove();" class="btn-primary w-full ${color}">
+                            OK
+                        </button>
+                    </div>
+                </div>
+            `;
+            // Pastikan tidak ada modal lain yang terbuka
+            if (document.getElementById('custom-modal')) {
+                document.getElementById('custom-modal').remove();
+            }
+            container.insertAdjacentHTML('beforeend', modalHtml);
+        }
+        
+        /**
+         * Merender ulang ekspresi matematika KaTeX pada elemen tertentu.
+         */
+        function renderMath() {
+            // Pastikan KaTeX tersedia
+            if (typeof renderMathInElement === 'function') {
+                renderMathInElement(document.getElementById('app-container'), {
+                    // Konfigurasi agar tidak merender ulang elemen yang sudah ada
+                    delimiters: [
+                        {left: '$$', right: '$$', display: true},
+                        {left: '$', right: '$', display: false},
+                    ],
+                    throwOnError : false
+                });
+            }
+        }
+
+
+        /**
+         * Render tampilan berdasarkan state currentView.
+         */
+        function renderView(view) {
+            currentView = view;
+            const container = document.getElementById('app-container');
+
+            if (!isAuthReady) {
+                 container.innerHTML = `
+                    <div class="card p-6 text-center">
+                        <p class="text-gray-600">Memuat konfigurasi aplikasi...</p>
+                    </div>
+                `;
+                return;
+            }
+
+            // Hentikan timer jika ada
+            if (timerInterval) {
+                clearInterval(timerInterval);
+                timerInterval = null;
+            }
+
+            switch (view) {
+                case 'login':
+                    container.innerHTML = renderLoginPage();
+                    break;
+                case 'student-exam':
+                    container.innerHTML = renderStudentExamPage();
+                    startTimer();
+                    break;
+                case 'teacher-dashboard':
+                    container.innerHTML = renderTeacherDashboard();
+                    break;
+                case 'result':
+                    container.innerHTML = renderResultPage();
+                    break;
+                default:
+                    container.innerHTML = renderLoginPage();
+            }
+            
+            // Render Math setelah DOM dimuat
+            if (view === 'student-exam' || view === 'teacher-dashboard') {
+                setTimeout(renderMath, 0); 
+            }
+
+            // Setelah merender, lampirkan event listener jika perlu
+            if (view === 'teacher-dashboard') {
+                loadTeacherData();
+            }
+        }
+
+        // --- RENDER LOGIN PAGE ---
+        function renderLoginPage() {
+            return `
+                <div class="card p-8 max-w-lg mx-auto">
+                    <h1 class="text-3xl font-bold text-gray-800 mb-2 text-center">ASESMEN FISIKA KELAS XII</h1>
+                    <h2 class="text-xl font-medium text-indigo-600 mb-6 text-center">(LISTRIK STATIS & DINAMIS)</h2>
+                    <div class="mb-4">
+                        <label for="login-name" class="block text-sm font-medium text-gray-700 mb-1">Nama Pengguna (Nama Siswa atau Kunci Guru)</label>
+                        <input type="text" id="login-name" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500" placeholder="Masukkan nama atau kunci">
+                    </div>
+
+                    <div class="flex flex-col space-y-4">
+                        <button onclick="handleLogin('siswa')" class="btn-primary flex items-center justify-center">
+                            <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5.121 17.804A13.937 13.937 0 0112 16c2.5 0 4.847.655 6.879 1.804M15 10a3 3 0 11-6 0 3 3 0 016 0zm6 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                            Masuk sebagai Siswa
+                        </button>
+                        <button onclick="handleLogin('guru')" class="btn-secondary flex items-center justify-center">
+                            <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 14v6m-3-3h6M6 10h2m3 0h2m3 0h2M6 14h2m3 0h2m3 0h2M6 18h2m3 0h2m3 0h2M17 4h3a2 2 0 012 2v2m-2-4h-6M4 4h3a2 2 0 002 2v2m-5-4v6M12 4v2M4 14h3M4 18h3M4 10h3M17 10h3M17 14h3M17 18h3M12 18v2m-3-8h6"></path></svg>
+                            Masuk sebagai Guru (Kunci: ADMIN)
+                        </button>
+                    </div>
+                    <p class="mt-4 text-xs text-center text-red-500">Penting: Siswa hanya bisa login 1 kali dengan nama yang sama.</p>
+                    <p class="mt-2 text-xs text-center text-gray-500">ID Sesi: ${appId}</p>
+                </div>
+            `;
+        }
+
+        // --- LOGIN HANDLER ---
+        async function handleLogin(role) {
+            const inputName = document.getElementById('login-name').value.trim();
+
+            if (!inputName) {
+                alertModal("Nama pengguna harus diisi.", "error");
+                return;
+            }
+
+            if (role === 'guru') {
+                // Kunci Guru (hardcoded untuk demo)
+                if (inputName.toUpperCase() === 'ADMIN') {
+                    studentRole = 'guru';
+                    renderView('teacher-dashboard');
+                } else {
+                    alertModal("Kunci Guru salah.", "error");
+                }
+            } else if (role === 'siswa') {
+                const alreadyLoggedIn = await checkStudentLogin(inputName);
+                if (alreadyLoggedIn) {
+                    alertModal("Anda sudah pernah mengerjakan ujian ini. Siswa hanya diizinkan login satu kali.", "error");
+                    return;
+                }
+
+                studentName = inputName;
+                studentRole = 'siswa';
+                // Reset state ujian
+                currentQuestionIndex = 0;
+                timeLeft = totalExamTime;
+                Object.keys(answers).forEach(key => delete answers[key]); // Clear previous answers
+                renderView('student-exam');
+            }
+        }
+
+
+        // --- RENDER STUDENT EXAM PAGE ---
+
+        function renderStudentExamPage() {
+            const currentQ = questions[currentQuestionIndex];
+            const isMC = currentQ.type === 'mc';
+            const totalQuestions = questions.length;
+
+            // Timer (akan diupdate oleh JS)
+            const minutes = String(Math.floor(timeLeft / 60)).padStart(2, '0');
+            const seconds = String(timeLeft % 60).padStart(2, '0');
+
+            // Pilihan Ganda (MC) atau Benar/Salah (T/F)
+            const answerOptionsHtml = isMC
+                ? Object.entries(currentQ.options).map(([key, value]) => `
+                    <label class="flex items-start p-4 mb-3 border rounded-lg cursor-pointer transition duration-150 ease-in-out hover:bg-indigo-50 ${answers[currentQ.id] === key ? 'bg-indigo-100 border-indigo-500' : 'bg-white border-gray-200'}">
+                        <input type="radio" name="answer" value="${key}" ${answers[currentQ.id] === key ? 'checked' : ''} onchange="handleAnswerChange('${currentQ.id}', this.value)" class="mt-1 mr-3 text-indigo-600 focus:ring-indigo-500 h-5 w-5">
+                        <span class="font-medium text-gray-700">${key}. ${value}</span>
+                    </label>
+                  `).join('')
+                : `
+                    <label class="flex items-center p-4 mb-3 border rounded-lg cursor-pointer transition duration-150 ease-in-out hover:bg-indigo-50 ${answers[currentQ.id] === 'Benar' ? 'bg-indigo-100 border-indigo-500' : 'bg-white border-gray-200'}">
+                        <input type="radio" name="answer" value="Benar" ${answers[currentQ.id] === 'Benar' ? 'checked' : ''} onchange="handleAnswerChange('${currentQ.id}', this.value)" class="mt-1 mr-3 text-indigo-600 focus:ring-indigo-500 h-5 w-5">
+                        <span class="font-medium text-gray-700">Benar</span>
+                    </label>
+                    <label class="flex items-center p-4 mb-3 border rounded-lg cursor-pointer transition duration-150 ease-in-out hover:bg-indigo-50 ${answers[currentQ.id] === 'Salah' ? 'bg-indigo-100 border-indigo-500' : 'bg-white border-gray-200'}">
+                        <input type="radio" name="answer" value="Salah" ${answers[currentQ.id] === 'Salah' ? 'checked' : ''} onchange="handleAnswerChange('${currentQ.id}', this.value)" class="mt-1 mr-3 text-indigo-600 focus:ring-indigo-500 h-5 w-5">
+                        <span class="font-medium text-gray-700">Salah</span>
+                    </label>
+                `;
+
+            // Navigation grid (Right side)
+            const navGridHtml = questions.map((q, index) => {
+                let statusClass = 'bg-gray-200 text-gray-700';
+                if (answers[q.id]) {
+                    statusClass = 'answered-q';
+                }
+                if (index === currentQuestionIndex) {
+                    statusClass = 'active-q';
+                }
+                return `
+                    <div onclick="goToQuestion(${index})" class="question-nav-item ${statusClass} p-3 w-10 h-10 flex items-center justify-center rounded-lg text-sm font-semibold">
+                        ${index + 1}
+                    </div>
+                `;
+            }).join('');
+
+            return `
+                <div class="flex flex-col h-full space-y-4">
+                    <!-- HEADER -->
+                    <div class="card p-4 flex justify-between items-center sticky top-0 z-10">
+                        <div class="text-lg font-semibold text-gray-800">
+                            Nama Siswa: <span class="text-indigo-600">${studentName}</span>
+                        </div>
+                        <div id="timer-display" class="bg-red-500 text-white font-bold p-2 rounded-lg text-xl shadow-lg">
+                            Waktu: ${minutes}:${seconds}
+                        </div>
+                    </div>
+
+                    <!-- MAIN CONTENT -->
+                    <div class="flex flex-col lg:flex-row flex-grow space-y-6 lg:space-y-0 lg:space-x-6">
+                        <!-- Left Panel: Question Content -->
+                        <div class="card p-6 flex-grow lg:w-3/4 overflow-y-auto max-h-[80vh]">
+                            <h2 class="text-xl font-bold text-gray-800 mb-4">Soal Nomor ${currentQuestionIndex + 1} dari ${totalQuestions}</h2>
+                            <div class="text-lg mb-6 leading-relaxed text-gray-700">
+                                ${currentQ.text}
+                            </div>
+                            <!-- Jawaban -->
+                            <div class="space-y-3">
+                                ${answerOptionsHtml}
+                            </div>
+                        </div>
+
+                        <!-- Right Panel: Question Navigation -->
+                        <div class="card p-4 lg:w-1/4 h-min">
+                            <h3 class="text-lg font-semibold text-gray-800 mb-3">Navigasi Soal (${Object.keys(answers).length} Terjawab)</h3>
+                            <div class="grid grid-cols-5 gap-3">
+                                ${navGridHtml}
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- FOOTER NAVIGATION -->
+                    <div class="card p-4 flex justify-between items-center sticky bottom-0 z-10">
+                        <button onclick="changeQuestion(-1)" ${currentQuestionIndex === 0 ? 'disabled' : ''} class="btn-secondary flex items-center disabled:opacity-50">
+                            <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 15l-3-3m0 0l3-3m-3 3h8m-9 0a9 9 0 1118 0 9 9 0 01-18 0z"></path></svg>
+                            Sebelumnya
+                        </button>
+                        <button onclick="endExamConfirmation()" class="btn-primary bg-red-600 hover:bg-red-700">
+                            <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4M10 16.5A7.5 7.5 0 1010 1.5 7.5 7.5 0 0010 16.5z"></path></svg>
+                            Akhiri Ujian
+                        </button>
+                        <button onclick="changeQuestion(1)" ${currentQuestionIndex === questions.length - 1 ? 'disabled' : ''} class="btn-primary flex items-center disabled:opacity-50">
+                            Selanjutnya
+                            <svg class="w-5 h-5 ml-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 9l3 3m0 0l-3 3m3-3H8m9 0a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                            
+                        </button>
+                    </div>
+                </div>
+            `;
+        }
+
+        // --- TIMER LOGIC ---
+        function updateTimerDisplay() {
+            const minutes = String(Math.floor(timeLeft / 60)).padStart(2, '0');
+            const seconds = String(timeLeft % 60).padStart(2, '0');
+            const timerEl = document.getElementById('timer-display');
+            if (timerEl) {
+                timerEl.textContent = `Waktu: ${minutes}:${seconds}`;
+            }
+        }
+
+        function startTimer() {
+            if (timerInterval) clearInterval(timerInterval);
+
+            timerInterval = setInterval(() => {
+                if (timeLeft > 0) {
+                    timeLeft--;
+                    updateTimerDisplay();
+                } else {
+                    clearInterval(timerInterval);
+                    endExam(true); // Waktu habis
+                }
+            }, 1000);
+        }
+
+        // --- EXAM HANDLERS ---
+        function handleAnswerChange(qId, answer) {
+            answers[qId] = answer;
+            renderView('student-exam'); // Render ulang untuk update tampilan navigasi dan pilihan
+        }
+
+        function changeQuestion(step) {
+            const newIndex = currentQuestionIndex + step;
+            if (newIndex >= 0 && newIndex < questions.length) {
+                currentQuestionIndex = newIndex;
+                renderView('student-exam');
+            }
+        }
+
+        function goToQuestion(index) {
+            currentQuestionIndex = index;
+            renderView('student-exam');
+        }
+
+        function endExamConfirmation() {
+            const unansweredCount = questions.length - Object.keys(answers).length;
+
+            const container = document.getElementById('app-container');
+            const modalHtml = `
+                <div id="confirmation-modal" class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
+                    <div class="card p-6 w-11/12 md:w-1/3">
+                        <h3 class="text-xl font-bold text-gray-800 mb-4 border-b pb-2">Akhiri Ujian</h3>
+                        <p class="text-gray-700 mb-6">Anda memiliki ${unansweredCount} soal yang belum terjawab. Apakah Anda yakin ingin mengakhiri ujian?</p>
+                        <div class="flex justify-end space-x-3">
+                            <button onclick="document.getElementById('confirmation-modal').remove();" class="btn-secondary">
+                                Batalkan
+                            </button>
+                            <button onclick="endExam(false); document.getElementById('confirmation-modal').remove();" class="btn-primary bg-red-600 hover:bg-red-700">
+                                Ya, Akhiri Ujian
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            container.insertAdjacentHTML('beforeend', modalHtml);
+        }
+
+        async function endExam(isTimeOut) {
+            if (timerInterval) clearInterval(timerInterval);
+
+            // 1. Hitung Nilai
+            let score = 0;
+            questions.forEach(q => {
+                if (answers[q.id] === q.answer) {
+                    score++;
+                }
+            });
+
+            // 2. Simpan Hasil ke Firestore
+            await saveStudentResult(studentName, score, questions.length);
+
+            // 3. Tampilkan Halaman Hasil
+            const message = isTimeOut ?
+                "Waktu ujian telah habis. Hasil Anda telah disimpan." :
+                "Ujian telah selesai. Hasil Anda telah disimpan.";
+
+            alertModal(message, 'success');
+            renderView('result');
+        }
+
+        function renderResultPage() {
+            return `
+                <div class="card p-8 max-w-xl mx-auto text-center">
+                    <svg class="w-20 h-20 text-green-500 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.27a9.96 9.96 0 00-1.721-3.666 9.96 9.96 0 00-3.666-1.721 9.96 9.96 0 00-4.998 0 9.96 9.96 0 00-3.666 1.721 9.96 9.96 0 00-1.721 3.666 9.96 9.96 0 000 4.998 9.96 9.96 0 001.721 3.666 9.96 9.96 0 003.666 1.721 9.96 9.96 0 004.998 0 9.96 9.96 0 003.666-1.721 9.96 9.96 0 001.721-3.666 9.96 9.96 0 000-4.998z"></path></svg>
+                    <h1 class="text-3xl font-bold text-gray-800 mb-4">Ujian Selesai!</h1>
+                    <p class="text-lg text-gray-700 mb-6">Terima kasih, ${studentName}. Hasil ujian Anda telah berhasil direkam.</p>
+                    <button onclick="renderView('login')" class="btn-primary">
+                        Selesai dan Kembali ke Login
+                    </button>
+                </div>
+            `;
+        }
+
+
+        // --- RENDER TEACHER DASHBOARD ---
+
+        function renderTeacherDashboard() {
+            return `
+                <div class="card p-8 w-full">
+                    <div class="flex justify-between items-center mb-6 border-b pb-4">
+                        <h1 class="text-3xl font-bold text-gray-800">Dashboard Guru</h1>
+                        <button onclick="renderView('login')" class="btn-secondary flex items-center">
+                            <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1m-3 0v1m-3-1v1"></path></svg>
+                            Logout
+                        </button>
+                    </div>
+
+                    <p class="text-sm text-gray-500 mb-4">Total Soal: ${questions.length} | ID Sesi: ${appId}</p>
+
+                    <div class="flex justify-between items-center mb-6">
+                         <button onclick="downloadPDF()" class="btn-primary flex items-center bg-green-600 hover:bg-green-700">
+                            <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+                            Download Rekap Nilai (PDF)
+                        </button>
+                        <button onclick="loadTeacherData()" class="btn-secondary flex items-center">
+                            <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m15.356 2a8.001 8.001 0 01-14.22 3.667m7.11-1.667L21 17M3 7l3 3"></path></svg>
+                            Refresh Data
+                        </button>
+                    </div>
+
+                    <div class="overflow-x-auto card p-4">
+                        <table class="min-w-full divide-y divide-gray-200">
+                            <thead class="bg-gray-50">
+                                <tr>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">No.</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Nama Siswa</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Benar</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Salah</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Nilai (%)</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Waktu Selesai</th>
+                                </tr>
+                            </thead>
+                            <tbody id="results-table-body" class="bg-white divide-y divide-gray-200">
+                                <!-- Data akan dimuat di sini -->
+                                <tr><td colspan="6" class="p-6 text-center text-gray-500">Memuat data...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            `;
+        }
+
+        async function loadTeacherData() {
+            if (!db) {
+                document.getElementById('results-table-body').innerHTML = `<tr><td colspan="6" class="p-6 text-center text-red-500">Database tidak siap.</td></tr>`;
+                return;
+            }
+
+            const results = await fetchAllResults();
+            currentResults = results; // Simpan data untuk PDF
+
+            const tableBody = document.getElementById('results-table-body');
+            if (!tableBody) return;
+            tableBody.innerHTML = '';
+
+            if (results.length === 0) {
+                tableBody.innerHTML = `<tr><td colspan="6" class="p-6 text-center text-gray-500">Belum ada siswa yang menyelesaikan ujian.</td></tr>`;
+                return;
+            }
+
+            results.forEach((result, index) => {
+                const total = result.totalQuestions;
+                const correct = result.score;
+                const incorrect = total - correct;
+                const percentage = result.percentage.toFixed(2);
+                const date = new Date(result.timestamp).toLocaleString('id-ID');
+
+                const row = `
+                    <tr class="hover:bg-gray-50">
+                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">${index + 1}</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${result.name}</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-green-600 font-semibold">${correct}</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-red-600 font-semibold">${incorrect}</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm font-bold ${percentage >= 75 ? 'text-indigo-600' : 'text-orange-500'}">${percentage}%</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${date}</td>
+                    </tr>
+                `;
+                tableBody.insertAdjacentHTML('beforeend', row);
+            });
+        }
+
+        // --- PDF DOWNLOAD UTILITY (Requires jsPDF) ---
+        function downloadPDF() {
+            if (currentResults.length === 0) {
+                alertModal("Tidak ada data hasil untuk diunduh.", "error");
+                return;
+            }
+
+            // Gunakan window.jspdf.jsPDF
+            const { jsPDF } = window.jspdf;
+            
+            // PENTING: autoTable seharusnya tersedia karena pluginnya sudah dimuat di <head>
+            if (!jsPDF || !jsPDF.API.autoTable) {
+                alertModal("Pustaka jsPDF atau plugin AutoTable tidak dimuat dengan benar. Gagal membuat PDF.", "error");
+                return;
+            }
+
+            const doc = new jsPDF();
+
+            doc.setFontSize(18);
+            doc.text("Rekapitulasi Nilai Ujian CBT Fisika", 10, 15);
+            doc.setFontSize(12);
+            doc.text(`Kelas XII | Sesi: ${appId}`, 10, 22);
+            doc.text(`Total Soal: ${questions.length}`, 10, 29);
+
+            const tableColumn = ["No.", "Nama Siswa", "Benar", "Salah", "Nilai (%)", "Waktu Selesai"];
+            const tableRows = [];
+
+            currentResults.forEach((result, index) => {
+                const total = result.totalQuestions;
+                const correct = result.score;
+                const incorrect = total - correct;
+                const percentage = result.percentage.toFixed(2) + '%';
+                const date = new Date(result.timestamp).toLocaleString('id-ID', {
+                    day: '2-digit', month: '2-digit', year: 'numeric',
+                    hour: '2-digit', minute: '2-digit'
+                });
+
+                tableRows.push([
+                    index + 1,
+                    result.name,
+                    correct,
+                    incorrect,
+                    percentage,
+                    date
+                ]);
+            });
+
+            // AutoTable plugin for jsPDF - Menggunakan format non-deprecated
+            doc.autoTable({
+                head: [tableColumn], // Baris header
+                body: tableRows,     // Baris data
+                startY: 40,
+                headStyles: { fillColor: [79, 70, 229] }, // Indigo 600
+                styles: { fontSize: 10, cellPadding: 2, overflow: 'linebreak' },
+                columnStyles: {
+                    0: { cellWidth: 10 },
+                    2: { cellWidth: 15 },
+                    3: { cellWidth: 15 },
+                    4: { cellWidth: 18 }
+                }
+            });
+
+            doc.save(`RekapNilai_CBT_Fisika_KelasXII_${new Date().toISOString().slice(0, 10)}.pdf`);
+        }
+
+
+        // --- EXPOSE FUNCTIONS TO GLOBAL SCOPE (FIX FOR ONCLICK ISSUE) ---
+        window.alertModal = alertModal;
+        window.renderView = renderView;
+        window.handleLogin = handleLogin;
+        window.handleAnswerChange = handleAnswerChange;
+        window.changeQuestion = changeQuestion;
+        window.goToQuestion = goToQuestion;
+        window.endExamConfirmation = endExamConfirmation;
+        window.endExam = endExam;
+        window.loadTeacherData = loadTeacherData;
+        window.downloadPDF = downloadPDF;
+
+
+        // --- START APPLICATION ---
+        if (isAuthReady) {
+             renderView('login');
+        } else {
+            console.log("Waiting for authentication to be ready...");
+        }
+
+    </script>
+</body>
+</html>
